@@ -1,0 +1,316 @@
+module ALU_rtl_design #(parameter length = 4, M = 4) (
+    input [length-1:0] OPA, OPB,
+    input CLK, RST, CE, MODE, CIN,
+    input [1:0] INP_VALID,
+    input [M-1:0] CMD,
+    output reg [(length*2):0] RES = {(length*2){1'b0}},
+    output reg COUT = 1'b0,
+    output reg OFLOW = 1'b0,
+    output reg G = 1'b0,
+    output reg E = 1'b0,
+    output reg L = 1'b0,
+    output reg ERR = 1'b0
+);
+
+    reg [length-1:0] opa_t, opb_t;
+    reg [length:0] opa_a,opb_b;
+    reg [M-1:0] cmd_t;
+    reg [1:0] inp_valid_t;
+    reg [length:0]res_t;
+    reg [(length*2):0] mul_res;
+    reg [(length*2):0] mul_res_t;
+    reg cin_t, mode_t, ce_t, cout_t, oflow_t, err_t, g_t, e_t, l_t;
+
+    localparam rot_bits = $clog2(length);
+    wire [rot_bits-1:0] rot_val = opb_t[rot_bits-1:0];
+
+   localparam [M-1:0]ADD= 4'b0000,
+                     SUB= 4'b0001,
+                     ADD_CIN = 4'b0010,
+                     SUB_CIN = 4'b0011,
+                     INC_A  = 4'b0100,
+                     DEC_A  = 4'b0101,
+                     INC_B  = 4'b0110,
+                     DEC_B  = 4'b0111,
+                     CMP    = 4'b1000,
+                     MUL_IN = 4'b1001,
+                     MUL_S  = 4'b1010,
+                     ADD_S  = 4'b1011,
+                     SUB_S  = 4'b1100;
+    localparam [M-1:0]AND    = 4'b0000,
+                      NAND   = 4'b0001,
+                      OR     = 4'b0010,
+                      NOR    = 4'b0011,
+                      XOR    = 4'b0100,
+                      XNOR   = 4'b0101,
+                      NOT_A  = 4'b0110,
+                      NOT_B  = 4'b0111,
+                      SHR1_A  = 4'b1000,
+                      SHL1_A  = 4'b1001,
+                      SHR1_B  = 4'b1010,
+                      SHL1_B  = 4'b1011,
+                      ROL    = 4'b1100,
+                      ROR    = 4'b1101;
+
+    always @(posedge CLK or posedge RST) begin
+        if (RST) begin
+            opa_t <= 0;
+            opb_t <= 0;
+            cmd_t <= 0;
+            inp_valid_t <= 0;
+            res_t <= {(length*2){1'b0}};
+            mul_res <= {(length*2){1'b0}};
+            mul_res_t <= {(length*2){1'b0}};
+            cin_t <= 0;
+            mode_t <= 0;
+            ce_t <= 0;
+            cout_t <= 0;
+            oflow_t <= 0;
+            err_t <= 0;
+            g_t <= 0;
+            e_t <= 0;
+            l_t <= 0;
+            opa_a<=0;
+            opb_b<=0;
+        end
+        else if(cmd_t == MUL_IN|| cmd_t == MUL_S)begin
+            mul_res_t <= mul_res;
+            RES <= mul_res_t;
+            opa_t <= OPA;
+            opb_t <= OPB;
+            opa_a<=OPA+1;
+            opb_b<=OPB+1;
+            cmd_t <= CMD;
+            inp_valid_t <= INP_VALID;
+            cin_t <= CIN;
+            mode_t <= MODE;
+            ce_t <= CE;
+            COUT <= cout_t;
+            OFLOW <= oflow_t;
+            ERR <= err_t;
+            G <= g_t;
+            E <= e_t;
+            L <= l_t;
+        end
+        else begin
+            opa_t <= OPA;
+            opb_t <= OPB;
+            cmd_t <= CMD;
+            inp_valid_t <= INP_VALID;
+            cin_t <= CIN;
+            mode_t <= MODE;
+            ce_t <= CE;
+            RES <= res_t;
+            COUT <= cout_t;
+            OFLOW <= oflow_t;
+            ERR <= err_t;
+            G <= g_t;
+            E <= e_t;
+            L <= l_t;
+        end
+end
+
+always @(*) begin
+    if (RST) begin
+        res_t = {(length*2){1'b0}};
+        cout_t = 0;
+        oflow_t = 0;
+        err_t = 0;
+        g_t = 0;
+        e_t = 0;
+        l_t = 0;
+    end else begin
+        if (ce_t) begin
+            cout_t = 0;
+            oflow_t = 0;
+            err_t = 0;
+            g_t = 0;
+            e_t = 0;
+            l_t = 0;
+            case (inp_valid_t)
+                2'b00: begin
+                    err_t = 1'b1;
+                    res_t = {(length*2){1'b0}};
+                end
+
+                2'b01: begin
+                    if (mode_t) begin
+                        case (cmd_t)
+                            INC_A: begin
+                                    res_t = opa_t + 1;
+                                    cout_t = res_t[length];
+                            end
+                            DEC_A: begin
+                                    res_t = opa_t - 1;
+                                      oflow_t = (opa_t == 0) ? 1 : 0;
+                            end
+                            default: begin
+                                err_t = 1'b1;
+                                res_t = {(length*2){1'b0}};
+                            end
+                        endcase
+                    end else begin
+                        case (cmd_t)
+                            NOT_A: res_t = {1'b0, ~opa_t};
+                            SHR1_A: res_t = {1'b0, opa_t >> 1};
+                            SHL1_A: res_t = {1'b0, opa_t << 1};
+                            default: begin
+                                err_t = 1'b1;
+                                res_t = {(length*2){1'b0}};
+                            end
+                        endcase
+                    end
+                end
+                2'b10: begin
+                    if (mode_t) begin
+                        case (cmd_t)
+                            INC_B: begin
+                                res_t = opb_t + 1;
+                                cout_t = res_t[length];
+                            end
+                            DEC_B: begin
+                                res_t = opb_t - 1;
+                                  oflow_t = (opb_t == 0) ? 1 : 0;
+                            end
+                            default: begin
+                                err_t = 1'b1;
+                                res_t = {(length*2){1'b0}};
+                            end
+                        endcase
+                    end else begin
+                        case (cmd_t)
+                            NOT_B: res_t = {1'b0, ~opb_t};
+                            SHR1_B: res_t = {1'b0, opb_t >> 1};
+                            SHL1_B: res_t = {1'b0, opb_t << 1};
+                            default: begin
+                                err_t = 1'b1;
+                                res_t = {(length*2){1'b0}};
+                            end
+                        endcase
+                    end
+                end
+                2'b11: begin
+                    if (mode_t) begin
+                        case (cmd_t)
+                            ADD: begin
+                                res_t = opa_t + opb_t;
+                                cout_t = res_t[length];
+                            end
+                            SUB: begin
+                                res_t = opa_t - opb_t;
+                                oflow_t = (opa_t<opb_t)?1:0;
+                            end
+                            ADD_CIN: begin
+                                res_t = opa_t + opb_t + cin_t;
+                                cout_t = res_t[length];
+                            end
+                            SUB_CIN: begin
+                                res_t = (opa_t - opb_t) - cin_t;
+                                //oflow_t = res_t[N];
+                                oflow_t = res_t[length];
+
+                            end
+                            INC_A: begin
+                                res_t = opa_t + 1;
+                                cout_t = res_t[length];
+                            end
+                            DEC_A: begin
+                               res_t = opa_t - 1;
+                               oflow_t = (opa_t == 0) ? 1 : 0;
+
+                            end
+                            INC_B: begin
+                                res_t = opb_t + 1;
+                                cout_t = res_t[length];
+                            end
+                            DEC_B: begin
+                                res_t = opb_t - 1;
+                                oflow_t = (opb_t == 0) ? 1 : 0;
+                            end
+                            CMP: begin
+                                if (opa_t < opb_t)
+                                      l_t = 1'b1;
+                                else if (opa_t == opb_t)
+                                      e_t = 1'b1;
+                                else if(opa_t>opb_t)
+                                      g_t = 1'b1;
+                                else
+                                begin
+                                      g_t=1'b0;
+                                      e_t=1'b0;
+                                      l_t=1'b0;end
+                            end
+                            MUL_IN: begin
+                                    mul_res = (opa_a) * (opb_b);
+                                end
+
+                            MUL_S: begin
+                                    mul_res = (opa_a << 1) * (opb_t);
+                                end
+
+                            ADD_S: begin
+                                res_t = ($signed(opa_t) + $signed(opb_t));
+                                oflow_t = ((opa_t[length-1] == opb_t[length-1]) && (res_t[length-1] != opa_t[length-1]))?1'b1:1'b0;
+                                l_t = ($signed(opa_t) < $signed(opb_t));
+                                e_t = ($signed(opa_t) == $signed(opb_t));
+                                g_t = ($signed(opa_t) > $signed(opb_t));
+                            end
+                            SUB_S: begin
+                                res_t = ($signed(opa_t) - $signed(opb_t));
+                                oflow_t = ((opa_t[length-1] != opb_t[length-1]) && (res_t[length-1] != opa_t[length-1]))?1'b1:1'b0;
+                                l_t = ($signed(opa_t) < $signed(opb_t));
+                                e_t = ($signed(opa_t) == $signed(opb_t));
+                                g_t = ($signed(opa_t) > $signed(opb_t));
+                            end
+                            default: begin
+                                err_t = 1;
+                                res_t = {(length*2){1'b0}};
+                            end
+                        endcase
+                    end else begin
+                        case (cmd_t)
+                            AND: res_t = {1'b0, opa_t & opb_t};
+                            NAND: res_t = {1'b0, ~(opa_t & opb_t)};
+                            OR: res_t = {1'b0, opa_t | opb_t};
+                            NOR: res_t = {1'b0, ~(opa_t | opb_t)};
+                            XOR: res_t = {1'b0, opa_t ^ opb_t};
+                            XNOR: res_t = {1'b0, ~(opa_t ^ opb_t)};
+                            NOT_A: res_t = {1'b0, ~opa_t};
+                            NOT_B: res_t = {1'b0, ~opb_t};
+                            SHR1_A: res_t = {1'b0, opa_t >> 1};
+                            SHL1_A: res_t = {1'b0, opa_t << 1};
+                            SHR1_B: res_t = {1'b0, opb_t >> 1};
+                            SHL1_B: res_t = {1'b0, opb_t << 1};
+                            ROL: begin
+                                res_t = {1'b0, (opa_t << rot_val) | (opa_t >> (length - rot_val))};
+                                err_t = (opb_t >= length);
+                            end
+                            ROR: begin
+                                res_t = {1'b0, (opa_t >> rot_val) | (opa_t << (length - rot_val))};
+                                err_t = (opb_t >= length);
+                            end
+                            default: begin
+                                res_t = {(length*2){1'b0}};
+                                err_t = 1'b1;
+                            end
+                        endcase
+                    end
+                end
+                default: begin
+                    res_t = {(length*2){1'b0}};
+                    err_t = 1'b1;
+                end
+            endcase
+        end
+        else begin
+            res_t = res_t;
+            err_t = err_t;
+            G = G;
+            E = E;
+            L = L;
+            oflow_t = oflow_t;
+            cout_t = cout_t;
+        end
+    end
+end
+endmodule
